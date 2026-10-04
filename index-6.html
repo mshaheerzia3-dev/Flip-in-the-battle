@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flap in the Battle</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;background:#071a35;font-family:system-ui,Arial,sans-serif;color:#fff}
+#app{width:min(900px,100%);padding:16px}
+.screen{min-height:600px;border-radius:24px;overflow:hidden;background:linear-gradient(#0a2b52,#0879b8);box-shadow:0 16px 50px #0008;position:relative}
+.menu{min-height:600px;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px 18px}
+.title{font-size:clamp(38px,9vw,72px);font-weight:1000;line-height:.9;letter-spacing:-3px;text-shadow:0 6px #0005}
+.gameword{font-size:clamp(25px,6vw,42px);font-weight:900;letter-spacing:8px;color:#bdefff;margin:12px 0}
+.crow{font-size:78px;margin:15px}
+button{border:0;border-radius:15px;padding:14px 22px;min-height:50px;font-size:17px;font-weight:900;cursor:pointer}
+.play{display:block;margin:10px auto 18px;background:#20c866;color:white;box-shadow:0 5px #108342;min-width:190px;font-size:22px}
+.play:active{transform:translateY(3px);box-shadow:0 2px #108342}
+.modes{display:grid;gap:9px;max-width:310px;margin:auto}
+.mode{background:#ffffff1c;border:1px solid #ffffff30;color:white}
+.mode.active{outline:2px solid #20c866;background:#20c86630}
+.hidden{display:none!important}
+.hud{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:12px}
+.badge{padding:8px 12px;border-radius:999px;background:#ffffffdd;color:#123;font-weight:900}
+#stage{margin:0 12px;overflow:hidden;border-radius:18px;border:2px solid #ffffff55;background:#42aeea;aspect-ratio:16/10;touch-action:none}
+canvas{width:100%;height:100%;display:block}
+.controls{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;padding:14px}
+.controls button{background:#fff;color:#123}
+.controls .primary{background:#20c866;color:#fff}
+.hint{text-align:center;padding:0 15px 18px;font-size:14px;color:#dff6ff}
+@media(max-width:500px){.screen{min-height:540px}.menu{min-height:540px}}
+</style>
+</head>
+<body>
+<div id="app">
+<div class="screen">
+<section id="menu" class="menu">
+<div>
+<div class="title">FLAP IN THE<br>BATTLE</div>
+<div class="gameword">GAME</div>
+<div class="crow">🐦‍⬛</div>
+<button id="play" class="play">▶ PLAY</button>
+<div class="modes">
+<button id="easy" class="mode active">🟢 Easy Mode — Playable</button>
+<button id="hard" class="mode">🔴 Hard Mode — Playable</button>
+</div>
+</div>
+</section>
+
+<section id="gameui" class="hidden">
+<div class="hud">
+<div class="badge">🐦‍⬛ Flap in the Battle</div>
+<div class="badge">Score: <span id="score">0</span></div>
+<div class="badge" id="difficulty">Easy Mode</div>
+</div>
+<div id="stage"><canvas id="canvas"></canvas></div>
+<div class="controls">
+<button id="up" class="primary">⬆️ FLAP</button>
+<button id="down">⬇️ DOWN</button>
+<button id="back">🏠 MENU</button>
+</div>
+<div id="hint" class="hint" aria-live="polite">Tap the game or press FLAP to fly.</div>
+</section>
+</div>
+</div>
+
+<script>
+(() => {
+const menu=document.getElementById("menu"), gameui=document.getElementById("gameui");
+const play=document.getElementById("play"), easy=document.getElementById("easy"), hard=document.getElementById("hard");
+const difficulty=document.getElementById("difficulty"), stage=document.getElementById("stage");
+const canvas=document.getElementById("canvas"), ctx=canvas.getContext("2d");
+const scoreEl=document.getElementById("score"), hint=document.getElementById("hint");
+let W=700,H=440,dpr=1,bird,obstacles=[],score=0,running=false,spawn=0,speed=2.25,last=0,raf=0,mode="easy";
+
+function resize(){
+ const r=stage.getBoundingClientRect();
+ dpr=Math.min(2,window.devicePixelRatio||1);
+ W=Math.max(320,r.width); H=Math.max(300,r.height);
+ canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function reset(){
+ bird={x:W*.23,y:H*.5,vy:0};
+ obstacles=[]; score=0; scoreEl.textContent="0";
+ spawn=25; speed=mode==="easy"?2.25:3.25; running=true;
+ hint.textContent="Tap the game or press FLAP to fly.";
+}
+function flap(){
+ if(!running){reset();return}
+ bird.vy=mode==="easy"?-5.7:-6.3;
+}
+function down(){
+ if(running) bird.vy=Math.min(mode==="easy"?6:7,bird.vy+(mode==="easy"?2.2:2.8));
+}
+function addObstacle(){
+ const gap=mode==="easy"?Math.max(190,H*.46):Math.max(145,H*.35);
+ const min=gap/2+38,max=H-gap/2-38;
+ const gy=min+Math.random()*Math.max(1,max-min);
+ obstacles.push({x:W+30,w:82,g:gy,gap,passed:false});
+}
+function cloud(x,y,w){
+ ctx.fillStyle="#fff";
+ ctx.beginPath();
+ ctx.arc(x+w*.22,y,18,0,Math.PI*2);
+ ctx.arc(x+w*.43,y-12,25,0,Math.PI*2);
+ ctx.arc(x+w*.67,y,19,0,Math.PI*2);
+ ctx.fill();
+ ctx.fillRect(x,y,w,18);
+}
+function draw(){
+ const sky=ctx.createLinearGradient(0,0,0,H);
+ sky.addColorStop(0,"#5bc0f5"); sky.addColorStop(1,"#188bd0");
+ ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+
+ for(let i=0;i<4;i++){
+   ctx.fillStyle="rgba(255,255,255,.35)";
+   ctx.beginPath();
+   ctx.arc((i*210+(performance.now()*.012)%210)-40,60+i*65,22,0,Math.PI*2);
+   ctx.fill();
+ }
+ for(const o of obstacles){
+   cloud(o.x,o.g-o.gap/2-20,o.w);
+   cloud(o.x,o.g+o.gap/2+2,o.w);
+ }
+
+ ctx.save();
+ ctx.translate(bird.x,bird.y);
+ ctx.rotate(Math.max(-.35,Math.min(.45,bird.vy*.04)));
+ ctx.fillStyle="#090909";
+ ctx.beginPath();ctx.ellipse(0,0,23,18,0,0,Math.PI*2);ctx.fill();
+ ctx.beginPath();ctx.ellipse(-18,-4,13,10,-.25,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#222";
+ ctx.beginPath();ctx.ellipse(-3,12,13,6,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(9,-7,6,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#111";ctx.beginPath();ctx.arc(11,-7,2.5,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#e6a400";
+ ctx.beginPath();ctx.moveTo(21,-3);ctx.lineTo(34,2);ctx.lineTo(21,7);ctx.closePath();ctx.fill();
+ ctx.restore();
+}
+function collision(){
+ if(bird.y<0||bird.y>H) return true;
+ for(const o of obstacles){
+   const top=o.g-o.gap/2,bottom=o.g+o.gap/2;
+   if(bird.x+19>o.x && bird.x-19<o.x+o.w &&
+      (bird.y-15<top || bird.y+15>bottom)) return true;
+ }
+ return false;
+}
+function loop(t){
+ const dt=Math.min(32,(t-last)||16)/16.67; last=t;
+ if(running){
+   bird.vy+=(mode==="easy"?.30:.38)*dt;
+   bird.y+=bird.vy*dt;
+   spawn-=dt;
+   if(spawn<=0){
+     addObstacle();
+     spawn=mode==="easy"?125:90;
+     speed=Math.min(mode==="easy"?3.1:5,speed+(mode==="easy"?.008:.025));
+   }
+   for(const o of obstacles){
+     o.x-=speed*dt;
+     if(!o.passed && o.x+o.w<bird.x){
+       o.passed=true; score++; scoreEl.textContent=score;
+     }
+   }
+   obstacles=obstacles.filter(o=>o.x+o.w>-30);
+   if(collision()){
+     running=false;
+     hint.textContent="💥 Battle over! Press FLAP to try again.";
+   }
+ }
+ draw();
+ raf=requestAnimationFrame(loop);
+}
+function choose(m){
+ mode=m;
+ easy.classList.toggle("active",m==="easy");
+ hard.classList.toggle("active",m==="hard");
+}
+function startGame(){
+ menu.classList.add("hidden"); gameui.classList.remove("hidden");
+ difficulty.textContent=mode==="easy"?"Easy Mode":"Hard Mode";
+ resize(); reset(); cancelAnimationFrame(raf); last=0; raf=requestAnimationFrame(loop);
+}
+play.addEventListener("click",startGame);
+easy.addEventListener("click",()=>choose("easy"));
+hard.addEventListener("click",()=>choose("hard"));
+document.getElementById("up").addEventListener("click",flap);
+document.getElementById("down").addEventListener("click",down);
+document.getElementById("back").addEventListener("click",()=>{
+ running=false; cancelAnimationFrame(raf); gameui.classList.add("hidden"); menu.classList.remove("hidden");
+});
+stage.addEventListener("pointerdown",e=>{e.preventDefault();flap()});
+window.addEventListener("resize",resize);
+})();
+</script>
+</body>
+</html>
